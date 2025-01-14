@@ -1,5 +1,37 @@
 import Foundation
 import Capacitor
+import BRLMPrinterKit
+
+func printImageWithBluetooth(image : String) {
+    let channels = BRLMPrinterSearcher.startBluetoothSearch().channels
+
+    if (channels.count >= 1) {
+        let channel = channels[0]
+        let genRes = BRLMPrinterDriverGenerator.open(channel)
+        guard genRes.error.code == BRLMOpenChannelErrorCode.noError,
+              let printerDriver = genRes.driver else {
+            print("error");
+            return
+        }
+        defer {
+            printerDriver.closeChannel()
+        }
+        guard
+            let imageData = image
+            let printSettings = BRMQLPrintSettings(defaultPrintSettingsWith: channel.printerModel)
+        else {
+            print("error");
+            return
+        }
+        printSettings.autoCut = true
+        printSettings.labeSize = channel.labelSize;
+        let printError = printerDriver.printImage(with: imageData, settings: printSettings)
+        if (printError.code != .noError) {
+            print("error");
+            return
+        }
+    }
+}
 
 @objc(PrinterPlugin)
 public class PrinterPlugin: CAPPlugin {
@@ -15,6 +47,50 @@ public class PrinterPlugin: CAPPlugin {
                     
                     if let documentData = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) {
                         DispatchQueue.main.async {
+                            let bluetoothPrint = printImageWithBluetooth(documentData);
+                            if (printError.code != .noError) {
+                                let printInfo = UIPrintInfo(dictionary: nil)
+                                printInfo.jobName = jobName
+                                printInfo.outputType = .general
+                                if orientation == "landscape" {
+                                    printInfo.orientation = .landscape
+                                } else if orientation == "portrait" {
+                                    printInfo.orientation = .portrait
+                                }
+                                
+                                printController.printInfo = printInfo
+                                printController.printingItem = documentData
+                                printController.present(animated: true, completionHandler: nil)
+                                
+                                call.resolve([
+                                    "message": "success",
+                                    "value": content,
+                                    "name": jobName
+                                ])
+                            } else {
+                                call.resolve([
+                                    "message": "success",
+                                    "value": content,
+                                    "name": jobName
+                                ])
+                            }
+                        }
+                        return
+                    } else {
+                        call.reject("Invalid dataUri data")
+                        return
+                    }
+                } else {
+                    call.reject("Invalid dataUri format")
+                    return
+                }
+            } else {
+                let base64String = content.replacingOccurrences(of: "base64:", with: "")
+
+                if let documentData = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) {
+                    DispatchQueue.main.async {
+                        let bluetoothPrint = printImageWithBluetooth(documentData);
+                        if (printError.code != .noError) {
                             let printInfo = UIPrintInfo(dictionary: nil)
                             printInfo.jobName = jobName
                             printInfo.outputType = .general
@@ -33,39 +109,14 @@ public class PrinterPlugin: CAPPlugin {
                                 "value": content,
                                 "name": jobName
                             ])
+                        } else {
+                            call.resolve([
+                                "message": "success",
+                                "value": content,
+                                "name": jobName
+                            ])
                         }
-                        return
-                    } else {
-                        call.reject("Invalid dataUri data")
-                        return
-                    }
-                } else {
-                    call.reject("Invalid dataUri format")
-                    return
-                }
-            } else {
-                let base64String = content.replacingOccurrences(of: "base64:", with: "")
-
-                if let documentData = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) {
-                    DispatchQueue.main.async {
-                        let printInfo = UIPrintInfo(dictionary: nil)
-                        printInfo.jobName = jobName
-                        printInfo.outputType = .general
-                        if orientation == "landscape" {
-                            printInfo.orientation = .landscape
-                        } else if orientation == "portrait" {
-                            printInfo.orientation = .portrait
-                        }
-                        
-                        printController.printInfo = printInfo
-                        printController.printingItem = documentData
-                        printController.present(animated: true, completionHandler: nil)
-                        
-                        call.resolve([
-                            "message": "success",
-                            "value": content,
-                            "name": jobName
-                        ])
+ 
                     }
                     return
                 } else {
@@ -74,40 +125,8 @@ public class PrinterPlugin: CAPPlugin {
                 }
             }
         } else {
-            guard let printData = content.data(using: String.Encoding.utf8) else {
-                call.reject("Invalid HTML content")
-                return
-            }
-            
-            do {
-                let printText = try NSAttributedString(data: printData, options: [.documentType: NSAttributedString.DocumentType.html,  .characterEncoding: String.Encoding.utf8.rawValue],  documentAttributes: nil)
-            
-                DispatchQueue.main.async {
-                    let formatter = UISimpleTextPrintFormatter(attributedText: printText)
-                    formatter.perPageContentInsets = UIEdgeInsets(top: 50.0, left: 50.0, bottom: 50.0, right: 50.0)
-                    let printInfo = UIPrintInfo(dictionary:nil)
-                    printInfo.jobName = jobName
-                    
-                    if orientation == "landscape" {
-                        printInfo.orientation = .landscape
-                    } else if orientation == "portrait" {
-                        printInfo.orientation = .portrait
-                    }
-                    
-                    printController.printInfo = printInfo
-                    printController.printFormatter = formatter
-                    printController.present(animated: true, completionHandler: nil)
-                }
-                       
-                call.resolve([
-                     "message": "success",
-                     "value": content,
-                     "name": jobName
-                 ])
-            }
-            catch {
-                call.reject("Error processing HTML content")
-            }
+            call.reject("Invalid content")
+            return
         }
     }
 }
