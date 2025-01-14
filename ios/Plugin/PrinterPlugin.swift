@@ -2,7 +2,27 @@ import Foundation
 import Capacitor
 import BRLMPrinterKit
 
-func printImageWithBluetooth(image : String) {
+func base64ToURL(base64String: String) -> URL? {
+  guard let data = Data(base64Encoded: base64String) else {
+    return nil
+  }
+  
+  let tempDirectory = FileManager.default.temporaryDirectory
+  let fileName = UUID().uuidString
+  let fileURL = tempDirectory.appendingPathComponent(fileName)
+  
+  do {
+    try data.write(to: fileURL)
+    return fileURL
+  } catch {
+    print("Error writing data to file: \(error)")
+    return nil
+  }
+}
+
+
+func printImageWithBluetooth(base64String : String) -> Optional {
+    guard let imageURL = base64ToURL(base64String: base64String) else { return false }
     let channels = BRLMPrinterSearcher.startBluetoothSearch().channels
 
     if (channels.count >= 1) {
@@ -11,26 +31,27 @@ func printImageWithBluetooth(image : String) {
         guard genRes.error.code == BRLMOpenChannelErrorCode.noError,
               let printerDriver = genRes.driver else {
             print("error");
-            return
+            return false
         }
         defer {
             printerDriver.closeChannel()
         }
         guard
-            let imageData = image
-            let printSettings = BRMQLPrintSettings(defaultPrintSettingsWith: channel.printerModel)
+            let printSettings = BRLMQLPrintSettings(defaultPrintSettingsWith: BRLMPrinterModel.QL_820NWB)
         else {
             print("error");
-            return
+            return false
         }
         printSettings.autoCut = true
-        printSettings.labeSize = channel.labelSize;
-        let printError = printerDriver.printImage(with: imageData, settings: printSettings)
-        if (printError.code != .noError) {
+        let printError = printerDriver.printImage(with: imageURL, settings: printSettings)
+        if (printError.code == .noError) {
             print("error");
-            return
+            return true
+        } else {
+            return false
         }
     }
+    return false
 }
 
 @objc(PrinterPlugin)
@@ -47,8 +68,13 @@ public class PrinterPlugin: CAPPlugin {
                     
                     if let documentData = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) {
                         DispatchQueue.main.async {
-                            let bluetoothPrint = printImageWithBluetooth(documentData);
-                            if (printError.code != .noError) {
+                           if let bluetoothPrint = printImageWithBluetooth(base64String : base64String) {
+                                call.resolve([
+                                    "message": "success",
+                                    "value": content,
+                                    "name": jobName
+                                ])
+                            } else {
                                 let printInfo = UIPrintInfo(dictionary: nil)
                                 printInfo.jobName = jobName
                                 printInfo.outputType = .general
@@ -61,13 +87,6 @@ public class PrinterPlugin: CAPPlugin {
                                 printController.printInfo = printInfo
                                 printController.printingItem = documentData
                                 printController.present(animated: true, completionHandler: nil)
-                                
-                                call.resolve([
-                                    "message": "success",
-                                    "value": content,
-                                    "name": jobName
-                                ])
-                            } else {
                                 call.resolve([
                                     "message": "success",
                                     "value": content,
@@ -89,8 +108,13 @@ public class PrinterPlugin: CAPPlugin {
 
                 if let documentData = Data(base64Encoded: base64String, options: .ignoreUnknownCharacters) {
                     DispatchQueue.main.async {
-                        let bluetoothPrint = printImageWithBluetooth(documentData);
-                        if (printError.code != .noError) {
+                        if let bluetoothPrint = printImageWithBluetooth(base64String: base64String) {
+                            call.resolve([
+                                "message": "success",
+                                "value": content,
+                                "name": jobName
+                            ])
+                        } else {
                             let printInfo = UIPrintInfo(dictionary: nil)
                             printInfo.jobName = jobName
                             printInfo.outputType = .general
@@ -103,13 +127,6 @@ public class PrinterPlugin: CAPPlugin {
                             printController.printInfo = printInfo
                             printController.printingItem = documentData
                             printController.present(animated: true, completionHandler: nil)
-                            
-                            call.resolve([
-                                "message": "success",
-                                "value": content,
-                                "name": jobName
-                            ])
-                        } else {
                             call.resolve([
                                 "message": "success",
                                 "value": content,
